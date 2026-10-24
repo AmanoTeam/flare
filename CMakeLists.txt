@@ -267,6 +267,27 @@ if (WIN32)
 	)
 endif()
 
+include(CheckCSourceCompiles)
+
+check_c_source_compiles(
+	"#include <features.h>
+	#if !defined(__linux__) || defined(__GLIBC__) || defined(__UCLIBC__) || defined(__BIONIC__)
+		#error \"not musl\"
+	#endif
+	int main(void) {
+		return 0;
+	}"
+	FLARE_MUSL
+)
+
+if (WIN32 OR FLARE_MUSL)
+	target_link_options(
+		flare
+		PRIVATE
+		-static
+	)
+endif()
+
 install(
 	TARGETS flare
 	RUNTIME DESTINATION bin
