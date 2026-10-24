@@ -108,6 +108,8 @@ string(REPLACE "check_pkg_config zlib zlib \"zlib.h\" zlibVersion ||" "check_lib
 
 string(REPLACE "check_lib zlib   zlib.h      zlibVersion    -lz; }" "true; }" FFMPEG_CONFIGURE_PATCHED "${FFMPEG_CONFIGURE_PATCHED}")
 
+string(REPLACE "enabled getenv || echo \"#define getenv(x) NULL\" >> $TMPH" "true" FFMPEG_CONFIGURE_PATCHED "${FFMPEG_CONFIGURE_PATCHED}")
+
 if (NOT "${FFMPEG_CONFIGURE_PATCHED}" STREQUAL "${FFMPEG_CONFIGURE_ORIGINAL}")
 	file(WRITE "${FFMPEG_SOURCE_DIRECTORY}/configure" "${FFMPEG_CONFIGURE_PATCHED}")
 endif()
