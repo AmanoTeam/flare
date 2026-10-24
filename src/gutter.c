@@ -360,6 +360,51 @@ static int bl(const uint8_t* const p) {
 	return p[0] <= BLACK && p[1] <= BLACK && p[2] <= BLACK;
 }
 
+#define NEUTRAL 8
+#define DOMINANT_WINDOW 4
+
+static int flat_row(const uint8_t* const p, const uint8_t* const e, const int w) {
+	unsigned int hist[256] = {0};
+
+	int r = 0;
+	int g = 0;
+	int b = 0;
+	int lo = 0;
+	int hi = 0;
+	int v = 0;
+	int best = 0;
+	int best_count = 0;
+	int window = 0;
+
+	const uint8_t* q = NULL;
+
+	for (q = p; q < e; q += 3) {
+		r = q[0];
+		g = q[1];
+		b = q[2];
+
+		lo = FFMIN3(r, g, b);
+		hi = FFMAX3(r, g, b);
+
+		if (hi - lo <= NEUTRAL) {
+			hist[(r * 77 + g * 150 + b * 29) >> 8]++;
+		}
+	}
+
+	for (v = 0; v < 256; v++) {
+		if (hist[v] > (unsigned int) best_count) {
+			best = v;
+			best_count = hist[v];
+		}
+	}
+
+	for (v = FFMAX(best - DOMINANT_WINDOW, 0); v <= FFMIN(best + DOMINANT_WINDOW, 255); v++) {
+		window += (int) hist[v];
+	}
+
+	return ((av_cmp_q(mkq(window, w), BAND) >= 0) ? best : -1);
+}
+
 static void copy_row(uint8_t* const dst, const uint8_t* const src, const int pad_left, const int copy, const int pad_right, const uint8_t left_fill, const uint8_t right_fill) {
 
 	int offset = 0;
@@ -423,8 +468,6 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 	int S = 0;
 	int KR = 0;
 	int runs = 0;
-	int c = 0;
-	int bc = 0;
 	int y = 0;
 	int start = 0;
 
@@ -434,7 +477,6 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 
 	const uint8_t* p = NULL;
 	const uint8_t* e = NULL;
-	const uint8_t* q = NULL;
 
 	rgb = decode(path, &W, &H, &S, &err);
 
@@ -455,26 +497,7 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 		p = rgb + y * S;
 		e = p + 3 * W;
 
-		c = 0;
-		bc = 0;
-
-		for (q = p; q < e; q += 3) {
-			if (wh(q)) {
-				c++;
-			}
-			else if (bl(q)) {
-				bc++;
-			}
-		}
-
-		gutter[y] = 0;
-
-		if (av_cmp_q(mkq(c, W), BAND) >= 0) {
-			gutter[y] = 1;
-		}
-		else if (av_cmp_q(mkq(bc, W), BAND) >= 0) {
-			gutter[y] = 2;
-		}
+		gutter[y] = (flat_row(p, e, W) >= 0);
 
 		if (gutter[y] == 0) {
 			KR++;
@@ -553,13 +576,13 @@ int flare_main(int argc, argv_t** argv) {
 	int OL = 0;
 	int y = 0;
 	int c = 0;
-	int bc = 0;
 
 	int runs = 0;
 	int start = 0;
 	int gsize = 0;
 	int kept = 0;
 	int pad = 0;
+	int fill = 0;
 
 	int kept_left = 0;
 	int kept_right = 0;
@@ -585,6 +608,7 @@ int flare_main(int argc, argv_t** argv) {
 	uint8_t* ob = NULL;
 	uint8_t* dst = NULL;
 	uint8_t* gutter = NULL;
+	uint8_t* shade = NULL;
 	long* cw = NULL;
 	long* cb = NULL;
 
@@ -704,8 +728,9 @@ int flare_main(int argc, argv_t** argv) {
 	}
 
 	gutter = av_mallocz(H);
+	shade = av_mallocz(H);
 
-	if (gutter == NULL) {
+	if (gutter == NULL || shade == NULL) {
 		err = FLAREERR_MEM_ALLOC_FAILURE;
 		goto end;
 	}
@@ -723,26 +748,11 @@ int flare_main(int argc, argv_t** argv) {
 	for (y = 0; y < H; y++) {
 		p = rgb + y * S;
 		e = p + 3 * W;
-		c = 0;
-		bc = 0;
 
-		for (q = p; q < e; q += 3) {
-			if (wh(q)) {
-				c++;
-			}
-			else if (bl(q)) {
-				bc++;
-			}
-		}
+		fill = flat_row(p, e, W);
 
-		gutter[y] = 0;
-
-		if (av_cmp_q(mkq(c, W), BAND) >= 0) {
-			gutter[y] = 1;
-		}
-		else if (av_cmp_q(mkq(bc, W), BAND) >= 0) {
-			gutter[y] = 2;
-		}
+		gutter[y] = (fill >= 0);
+		shade[y] = (uint8_t) FFMAX(fill, 0);
 
 		if (sides) {
 			for (cx = cw, bx = cb, q = p; q < e; q += 3, cx++, bx++) {
@@ -861,7 +871,7 @@ int flare_main(int argc, argv_t** argv) {
 		kept = ((gsize < minimum) ? gsize : minimum);
 		pad = minimum - kept;
 
-		run_fill = ((gutter[start] == 2) ? 0 : 255);
+		run_fill = shade[start];
 
 		for (c = start; c < start + kept; c++) {
 			copy_row(dst, rgb + c * S + cs * 3, pad_left, span, pad_right, left_fill, right_fill);
@@ -884,6 +894,7 @@ int flare_main(int argc, argv_t** argv) {
 
 	av_freep(&rgb);
 	av_freep(&gutter);
+	av_freep(&shade);
 	av_freep(&cw);
 	av_freep(&cb);
 	av_freep(&ob);
