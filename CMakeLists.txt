@@ -258,6 +258,14 @@ if (UNIX)
 	)
 endif()
 
+if (WIN32)
+	target_link_libraries(
+		flare
+		PRIVATE
+		bcrypt
+	)
+endif()
+
 install(
 	TARGETS flare
 	RUNTIME DESTINATION bin
