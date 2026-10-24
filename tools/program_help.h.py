@@ -7,7 +7,7 @@ import json
 
 parser = argparse.ArgumentParser(
 	prog = "flare",
-	description = "A command-line utility to crop white gutters off images.",
+	description = "A command-line utility to crop white and black gutters off images.",
 	allow_abbrev = False,
 	add_help = False,
 	epilog = "Note: options that take a value must use an equal sign (e.g. --input=INPUT)."
@@ -50,14 +50,14 @@ parser.add_argument(
 	"--minimum",
 	metavar = "MINIMUM",
 	required = False,
-	help = "Amount of white, in pixels, to leave for each gutter. Gutters wider than this are cropped down to it, narrower ones are extended with white, and places without a gutter are left as-is. Defaults to 0.")
+	help = "Amount of white or black, in pixels, to leave for each gutter. Gutters wider than this are cropped down to it, narrower ones are extended with their own color, and places without a gutter are left as-is. Defaults to 0.")
 
 parser.add_argument(
 	"-s",
 	"--sides",
 	required = False,
 	action = "store_true",
-	help = "Also crop the left and right white gutters."
+	help = "Also crop the left and right gutters."
 )
 
 os.environ["LINES"] = "1000"

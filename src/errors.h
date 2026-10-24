@@ -15,7 +15,7 @@
 
 #define FLAREERR_ENCODER_OPEN_FAILURE -8 /* Could not open the PNG encoder */
 
-#define FLAREERR_IMAGE_ENTIRELY_WHITE -9 /* The input image is entirely white */
+#define FLAREERR_IMAGE_NO_CONTENT -9 /* The input image has no content to keep */
 
 #define FLAREERR_INPUT_MISSING -10 /* No input file was supplied */
 #define FLAREERR_INPUT_OPEN_FAILURE -11 /* Could not open the input file */

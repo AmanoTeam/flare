@@ -18,6 +18,7 @@
 #include "program_help.h"
 
 #define WHITE 240
+#define BLACK 15
 
 static const AVRational BAND   = {199, 200};
 static const AVRational MARGIN = {999, 1000};
@@ -271,12 +272,16 @@ static int wh(const uint8_t* const p) {
 	return p[0] >= WHITE && p[1] >= WHITE && p[2] >= WHITE;
 }
 
-static void copy_row(uint8_t* const dst, const uint8_t* const src, const int pad_left, const int copy, const int pad_right) {
+static int bl(const uint8_t* const p) {
+	return p[0] <= BLACK && p[1] <= BLACK && p[2] <= BLACK;
+}
+
+static void copy_row(uint8_t* const dst, const uint8_t* const src, const int pad_left, const int copy, const int pad_right, const uint8_t left_fill, const uint8_t right_fill) {
 
 	int offset = 0;
 
 	if (pad_left > 0) {
-		memset(dst, 255, pad_left * 3);
+		memset(dst, left_fill, pad_left * 3);
 	}
 
 	offset = pad_left * 3;
@@ -284,7 +289,7 @@ static void copy_row(uint8_t* const dst, const uint8_t* const src, const int pad
 	memcpy(dst + offset, src, copy * 3);
 
 	if (pad_right > 0) {
-		memset(dst + offset + copy * 3, 255, pad_right * 3);
+		memset(dst + offset + copy * 3, right_fill, pad_right * 3);
 	}
 
 }
@@ -307,6 +312,7 @@ int flare_main(int argc, argv_t** argv) {
 	int OL = 0;
 	int y = 0;
 	int c = 0;
+	int bc = 0;
 
 	int runs = 0;
 	int start = 0;
@@ -318,6 +324,10 @@ int flare_main(int argc, argv_t** argv) {
 	int kept_right = 0;
 	int pad_left = 0;
 	int pad_right = 0;
+
+	uint8_t left_fill = 255;
+	uint8_t right_fill = 255;
+	uint8_t run_fill = 255;
 
 	int cs = 0;
 	int cols = 0;
@@ -335,6 +345,7 @@ int flare_main(int argc, argv_t** argv) {
 	uint8_t* dst = NULL;
 	uint8_t* gutter = NULL;
 	long* cw = NULL;
+	long* cb = NULL;
 
 	long value = 0;
 
@@ -342,6 +353,7 @@ int flare_main(int argc, argv_t** argv) {
 	const uint8_t* e = NULL;
 	const uint8_t* q = NULL;
 	long* cx = NULL;
+	long* bx = NULL;
 
 	argparse_t argparse = {0};
 	const arg_t* arg = NULL;
@@ -441,34 +453,53 @@ int flare_main(int argc, argv_t** argv) {
 
 	if (sides) {
 		cw = av_calloc(W, sizeof(long));
+		cb = av_calloc(W, sizeof(long));
 	}
 
 	for (y = 0; y < H; y++) {
 		p = rgb + y * S;
 		e = p + 3 * W;
 		c = 0;
+		bc = 0;
 
 		for (q = p; q < e; q += 3) {
-			c += wh(q);
+			if (wh(q)) {
+				c++;
+			}
+			else if (bl(q)) {
+				bc++;
+			}
 		}
 
-		gutter[y] = (av_cmp_q(mkq(c, W), BAND) >= 0);
+		gutter[y] = 0;
 
-		if (gutter[y]) {
+		if (av_cmp_q(mkq(c, W), BAND) >= 0) {
+			gutter[y] = 1;
+		}
+		else if (av_cmp_q(mkq(bc, W), BAND) >= 0) {
+			gutter[y] = 2;
+		}
+
+		if (sides) {
+			for (cx = cw, bx = cb, q = p; q < e; q += 3, cx++, bx++) {
+				if (wh(q)) {
+					*cx += 1;
+				}
+				else if (bl(q)) {
+					*bx += 1;
+				}
+			}
+		}
+
+		if (gutter[y] != 0) {
 			continue;
 		}
 
 		KR++;
-
-		if (sides) {
-			for (cx = cw, q = p; q < e; q += 3, cx++) {
-				*cx += wh(q);
-			}
-		}
 	}
 
 	if (!KR) {
-		die(FLAREERR_IMAGE_ENTIRELY_WHITE);
+		die(FLAREERR_IMAGE_NO_CONTENT);
 	}
 
 	runs = 0;
@@ -490,11 +521,11 @@ int flare_main(int argc, argv_t** argv) {
 	rb = W - 1;
 
 	if (sides) {
-		while (lb < W && av_cmp_q(mkq((int) cw[lb], KR), MARGIN) >= 0) {
+		while (lb < W && (av_cmp_q(mkq((int) cw[lb], H), MARGIN) >= 0 || av_cmp_q(mkq((int) cb[lb], H), MARGIN) >= 0)) {
 			lb++;
 		}
 
-		while (rb > lb && av_cmp_q(mkq((int) cw[rb], KR), MARGIN) >= 0) {
+		while (rb > lb && (av_cmp_q(mkq((int) cw[rb], H), MARGIN) >= 0 || av_cmp_q(mkq((int) cb[rb], H), MARGIN) >= 0)) {
 			rb--;
 		}
 	}
@@ -508,11 +539,19 @@ int flare_main(int argc, argv_t** argv) {
 		if (lb > 0) {
 			kept_left = ((lb < minimum) ? lb : minimum);
 			pad_left = minimum - kept_left;
+
+			if (av_cmp_q(mkq((int) cb[0], H), MARGIN) >= 0) {
+				left_fill = 0;
+			}
 		}
 
 		if (W - 1 - rb > 0) {
 			kept_right = ((W - 1 - rb < minimum) ? (W - 1 - rb) : minimum);
 			pad_right = minimum - kept_right;
+
+			if (av_cmp_q(mkq((int) cb[W - 1], H), MARGIN) >= 0) {
+				right_fill = 0;
+			}
 		}
 
 		cs = lb - kept_left;
@@ -534,7 +573,7 @@ int flare_main(int argc, argv_t** argv) {
 
 	while (y < H) {
 		if (!gutter[y]) {
-			copy_row(dst, rgb + y * S + cs * 3, pad_left, span, pad_right);
+			copy_row(dst, rgb + y * S + cs * 3, pad_left, span, pad_right, left_fill, right_fill);
 			dst += OL;
 			y++;
 			continue;
@@ -550,13 +589,15 @@ int flare_main(int argc, argv_t** argv) {
 		kept = ((gsize < minimum) ? gsize : minimum);
 		pad = minimum - kept;
 
+		run_fill = ((gutter[start] == 2) ? 0 : 255);
+
 		for (c = start; c < start + kept; c++) {
-			copy_row(dst, rgb + c * S + cs * 3, pad_left, span, pad_right);
+			copy_row(dst, rgb + c * S + cs * 3, pad_left, span, pad_right, left_fill, right_fill);
 			dst += OL;
 		}
 
 		if (pad > 0) {
-			memset(dst, 255, pad * OL);
+			memset(dst, run_fill, pad * OL);
 			dst += pad * OL;
 		}
 	}

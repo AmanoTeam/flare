@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 project(
 	flare
 	VERSION 0.1
-	DESCRIPTION "A command-line utility to crop white gutters off images"
+	DESCRIPTION "A command-line utility to crop white and black gutters off images"
 	HOMEPAGE_URL "https://github.com/AmanoTeam/flare"
 	LANGUAGES C
 )

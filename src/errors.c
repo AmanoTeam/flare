@@ -25,8 +25,8 @@ const char* flare_getmessage(const int code) {
 			return "Could not decode a frame from the input file";
 		case FLAREERR_ENCODER_OPEN_FAILURE:
 			return "Could not open the PNG encoder";
-		case FLAREERR_IMAGE_ENTIRELY_WHITE:
-			return "The input image is entirely white";
+		case FLAREERR_IMAGE_NO_CONTENT:
+			return "The input image has no content to keep";
 		case FLAREERR_INPUT_MISSING:
 			return "No input file was supplied";
 		case FLAREERR_INPUT_OPEN_FAILURE:
