@@ -57,13 +57,10 @@ set(
 	--enable-avformat
 	--enable-avutil
 	--enable-swscale
-	--enable-swresample
-	--enable-decoder=aac,h264,mp3,png,webp,mjpeg
+	--enable-decoder=png,webp,mjpeg
 	--enable-encoder=png
-	--enable-demuxer=aac,h264,hls,webvtt,mp3,image2,webp,image2pipe,image_png_pipe,image_jpeg_pipe,image_webp_pipe
-	--enable-muxer=h264,mpegts,mp4,matroska,mp3,image2
-	--enable-parser=h264,aac
-	--enable-bsf=extract_extradata
+	--enable-demuxer=image2,webp,image2pipe,image_png_pipe,image_jpeg_pipe,image_webp_pipe
+	--enable-muxer=image2
 	--enable-pic
 	--enable-protocol=file,crypto
 	--enable-small
@@ -231,8 +228,7 @@ set(
 	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}avformat${CMAKE_STATIC_LIBRARY_SUFFIX}"
 	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}avcodec${CMAKE_STATIC_LIBRARY_SUFFIX}"
 	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}swscale${CMAKE_STATIC_LIBRARY_SUFFIX}"
-	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}swresample${CMAKE_STATIC_LIBRARY_SUFFIX}"
-	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}avutil${CMAKE_STATIC_LIBRARY_SUFFIX}"
+		"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}avutil${CMAKE_STATIC_LIBRARY_SUFFIX}"
 )
 
 add_custom_command(
