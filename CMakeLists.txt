@@ -21,6 +21,7 @@ set(
 )
 
 set(FFMPEG_SOURCE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/submodules/ffmpeg")
+set(ZLIB_SOURCE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/submodules/zlib")
 
 set(FFMPEG_BUILD_DIRECTORY "${CMAKE_BINARY_DIR}/ffmpeg-build")
 set(FFMPEG_INSTALL_PREFIX "${FFMPEG_BUILD_DIRECTORY}/binaries")
@@ -70,12 +71,13 @@ set(
 	--extra-cflags=-Dstatic_assert=_Static_assert
 	--extra-cflags=-w
 	--extra-cflags=${CMAKE_C_FLAGS}
+	--extra-cflags=-I${ZLIB_SOURCE_DIRECTORY}
 	--extra-ldflags=-fPIC
 	--prefix="${FFMPEG_INSTALL_PREFIX}"
 )
 
 execute_process(
-	COMMAND git submodule update --init --depth=1 submodules/ffmpeg
+	COMMAND git submodule update --init --depth=1
 	WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 	COMMAND_ERROR_IS_FATAL ANY
 )
@@ -88,6 +90,7 @@ endif()
 
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/submodules/ffmpeg/configure" FILE_CONTENTS)
 string(REPLACE "die \"Host compiler lacks C11 support\"" "true" FILE_CONTENTS "${FILE_CONTENTS}")
+string(REPLACE "check_lib zlib   zlib.h      zlibVersion    -lz" "true" FILE_CONTENTS "${FILE_CONTENTS}")
 file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/submodules/ffmpeg/configure" "${FILE_CONTENTS}")
 
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
@@ -175,6 +178,23 @@ add_custom_target(
 	DEPENDS "${FFMPEG_INSTALL_PREFIX}"
 )
 
+# zlib
+set(ZLIB_BUILD_SHARED OFF)
+set(ZLIB_BUILD_STATIC ON)
+set(ZLIB_BUILD_TESTING OFF)
+set(BUILD_TESTING OFF)
+
+add_subdirectory(
+	submodules/zlib
+	EXCLUDE_FROM_ALL
+)
+
+set_target_properties(
+	zlibstatic
+	PROPERTIES
+	POSITION_INDEPENDENT_CODE ON
+)
+
 set(
 	FFMPEG_LIBRARIES
 	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}avformat${CMAKE_STATIC_LIBRARY_SUFFIX}"
@@ -223,13 +243,11 @@ if (FLARE_LTO)
 	endif()
 endif()
 
-find_package(ZLIB REQUIRED)
-
 target_link_libraries(
 	flare
 	PRIVATE
 	${FFMPEG_LIBRARIES}
-	ZLIB::ZLIB
+	zlibstatic
 )
 
 if (UNIX)
