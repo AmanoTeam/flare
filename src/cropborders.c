@@ -2,8 +2,10 @@
 #define inline __inline__
 #endif
 #include <jni.h>
-#include <math.h>
-#include <stdlib.h>
+#include <libavutil/common.h>
+#include <libavutil/mathematics.h>
+#include <libavutil/mem.h>
+#include <libavutil/rational.h>
 
 typedef struct {
 	unsigned int x;
@@ -12,10 +14,17 @@ typedef struct {
 	unsigned int height;
 } CropBordersRect;
 
-static const float CROPBORDERS_FILLED_RATIO_LIMIT = 0.0025;
+typedef int (*CropBordersDetect)(const unsigned char* const, const unsigned int, const int, const int);
 
-static const unsigned char CROPBORDERS_BLACK_THRESHOLD = (unsigned char) (255.0 * 0.75);
-static const unsigned char CROPBORDERS_WHITE_THRESHOLD = (unsigned char) (255.0 - 255.0 * 0.75);
+static const AVRational CROPBORDERS_THRESHOLD = {3, 4};
+static const AVRational CROPBORDERS_FILLED_LIMIT_RATIO = {1, 800};
+
+static const unsigned char CROPBORDERS_BLACK_THRESHOLD = (unsigned char) (255 * CROPBORDERS_THRESHOLD.num / CROPBORDERS_THRESHOLD.den);
+static const unsigned char CROPBORDERS_WHITE_THRESHOLD = (unsigned char) (255 * (CROPBORDERS_THRESHOLD.den - CROPBORDERS_THRESHOLD.num) / CROPBORDERS_THRESHOLD.den);
+
+static int filled_limit(const unsigned int dimension) {
+	return (int) av_rescale_rnd((int64_t) dimension, CROPBORDERS_FILLED_LIMIT_RATIO.num, CROPBORDERS_FILLED_LIMIT_RATIO.den, AV_ROUND_NEAR_INF);
+}
 
 static inline int is_black_pixel(const unsigned char* const pixels, const unsigned int width, const int x, const int y) {
 	return pixels[y * width + x] < CROPBORDERS_BLACK_THRESHOLD;
@@ -26,9 +35,9 @@ static inline int is_white_pixel(const unsigned char* const pixels, const unsign
 }
 
 static unsigned int find_border_top(const unsigned char* const pixels, const unsigned int width, const unsigned int height) {
-	const int limit = (int) round(width * CROPBORDERS_FILLED_RATIO_LIMIT / 2);
+	const int limit = filled_limit(width);
 
-	int (*detect)(const unsigned char* const, const unsigned int, const int, const int) = is_black_pixel;
+	CropBordersDetect detect = is_black_pixel;
 
 	int x = 0;
 	int y = 0;
@@ -71,9 +80,9 @@ static unsigned int find_border_top(const unsigned char* const pixels, const uns
 }
 
 static unsigned int find_border_bottom(const unsigned char* const pixels, const unsigned int width, const unsigned int height) {
-	const int limit = (int) round(width * CROPBORDERS_FILLED_RATIO_LIMIT / 2);
+	const int limit = filled_limit(width);
 
-	int (*detect)(const unsigned char* const, const unsigned int, const int, const int) = is_black_pixel;
+	CropBordersDetect detect = is_black_pixel;
 
 	int x = 0;
 	int y = 0;
@@ -116,9 +125,9 @@ static unsigned int find_border_bottom(const unsigned char* const pixels, const 
 }
 
 static unsigned int find_border_left(const unsigned char* const pixels, const unsigned int width, const unsigned int height, const unsigned int top, const unsigned int bottom) {
-	const int limit = (int) round(height * CROPBORDERS_FILLED_RATIO_LIMIT / 2);
+	const int limit = filled_limit(height);
 
-	int (*detect)(const unsigned char* const, const unsigned int, const int, const int) = is_black_pixel;
+	CropBordersDetect detect = is_black_pixel;
 
 	int x = 0;
 	int y = 0;
@@ -161,9 +170,9 @@ static unsigned int find_border_left(const unsigned char* const pixels, const un
 }
 
 static unsigned int find_border_right(const unsigned char* const pixels, const unsigned int width, const unsigned int height, const unsigned int top, const unsigned int bottom) {
-	const int limit = (int) round(height * CROPBORDERS_FILLED_RATIO_LIMIT / 2);
+	const int limit = filled_limit(height);
 
-	int (*detect)(const unsigned char* const, const unsigned int, const int, const int) = is_black_pixel;
+	CropBordersDetect detect = is_black_pixel;
 
 	int x = 0;
 	int y = 0;
@@ -222,32 +231,26 @@ static CropBordersRect find_borders(const unsigned char* const pixels, const uns
 }
 
 JNIEXPORT jintArray JNICALL Java_com_davemorrissey_labs_subscaleview_CropBorders_findCropBorders(JNIEnv* env, jclass caller, jbyteArray data, jint width, jint height) {
-	jbyte* rgba = NULL;
+	const int64_t size = (int64_t) FFMAX(width, 0) * (int64_t) FFMAX(height, 0);
+
 	unsigned char* gray = NULL;
+	jbyte* rgba = NULL;
 
 	jintArray result = NULL;
 	jint rect[4] = {0, 0, width, height};
 
-	const unsigned long size = (unsigned long) ((width > 0 && height > 0) ? width : 0) * (unsigned long) ((width > 0 && height > 0) ? height : 0);
-
 	(void) caller;
 
-	if (size == 0 || data == NULL) {
-		gray = NULL;
-	}
-	else {
-		gray = malloc(size);
+	if (size > 0 && data != NULL) {
+		gray = av_malloc(size);
 	}
 
-	if (gray == NULL) {
-		rgba = NULL;
-	}
-	else {
+	if (gray != NULL) {
 		rgba = (*env)->GetByteArrayElements(env, data, NULL);
 	}
 
 	if (rgba != NULL) {
-		unsigned long index = 0;
+		int64_t index = 0;
 
 		for (index = 0; index < size; index++) {
 			const unsigned int r = (unsigned char) rgba[index * 4 + 0];
@@ -260,19 +263,16 @@ JNIEXPORT jintArray JNICALL Java_com_davemorrissey_labs_subscaleview_CropBorders
 		(*env)->ReleaseByteArrayElements(env, data, rgba, JNI_ABORT);
 
 		{
-			const CropBordersRect cropped = find_borders(gray, width, height);
+			const CropBordersRect border = find_borders(gray, width, height);
 
-			rect[0] = (jint) cropped.x;
-			rect[1] = (jint) cropped.y;
-			rect[2] = (jint) cropped.width;
-			rect[3] = (jint) cropped.height;
+			rect[0] = (jint) border.x;
+			rect[1] = (jint) border.y;
+			rect[2] = (jint) border.width;
+			rect[3] = (jint) border.height;
 		}
+	}
 
-		free(gray);
-	}
-	else {
-		free(gray);
-	}
+	av_freep(&gray);
 
 	result = (*env)->NewIntArray(env, 4);
 
