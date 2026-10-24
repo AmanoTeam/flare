@@ -286,6 +286,7 @@ set(
 
 set(
 	FLARE_JNI_SOURCE_FILES
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/cropborders.c"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/flare-jni.c"
 )
 
