@@ -237,6 +237,7 @@ if (FLARE_LTO)
 	if (FLARE_HAS_LTO)
 		set_target_properties(
 			flare
+			zlibstatic
 			PROPERTIES
 			INTERPROCEDURAL_OPTIMIZATION TRUE
 		)
