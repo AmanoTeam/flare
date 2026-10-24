@@ -415,6 +415,138 @@ static void copy_row(uint8_t* const dst, const uint8_t* const src, const int pad
 	}
 #endif
 
+int flare_bounds(const char* const path, int* const bounds) {
+
+	int err = FLAREERR_SUCCESS;
+	int W = 0;
+	int H = 0;
+	int S = 0;
+	int KR = 0;
+	int c = 0;
+	int bc = 0;
+	int top = 0;
+	int bottom = 0;
+	int left = 0;
+	int right = 0;
+	int y = 0;
+	int x = 0;
+
+	uint8_t* rgb = NULL;
+	uint8_t* gutter = NULL;
+	long* cw = NULL;
+	long* cb = NULL;
+
+	const uint8_t* p = NULL;
+	const uint8_t* e = NULL;
+	const uint8_t* q = NULL;
+	long* cx = NULL;
+	long* bx = NULL;
+
+	rgb = decode(path, &W, &H, &S, &err);
+
+	if (rgb == NULL) {
+		return err;
+	}
+
+	gutter = av_mallocz(H);
+	cw = av_calloc(W, sizeof(long));
+	cb = av_calloc(W, sizeof(long));
+
+	if (gutter == NULL || cw == NULL || cb == NULL) {
+		err = FLAREERR_MEM_ALLOC_FAILURE;
+
+		goto end;
+	}
+
+	for (y = 0; y < H; y++) {
+		p = rgb + y * S;
+		e = p + 3 * W;
+
+		c = 0;
+		bc = 0;
+
+		for (q = p, cx = cw, bx = cb; q < e; q += 3, cx++, bx++) {
+			if (wh(q)) {
+				c++;
+				(*cx)++;
+			}
+			else if (bl(q)) {
+				bc++;
+				(*bx)++;
+			}
+		}
+
+		gutter[y] = 0;
+
+		if (av_cmp_q(mkq(c, W), BAND) >= 0) {
+			gutter[y] = 1;
+		}
+		else if (av_cmp_q(mkq(bc, W), BAND) >= 0) {
+			gutter[y] = 2;
+		}
+
+		if (gutter[y] == 0) {
+			KR++;
+		}
+	}
+
+	if (KR == 0) {
+		bounds[0] = 0;
+		bounds[1] = 0;
+		bounds[2] = W;
+		bounds[3] = H;
+
+		goto end;
+	}
+
+	y = 0;
+
+	while (gutter[y] != 0) {
+		y++;
+	}
+
+	top = y;
+
+	y = H - 1;
+
+	while (gutter[y] != 0) {
+		y--;
+	}
+
+	bottom = y + 1;
+
+	x = 0;
+
+	while (x < W && (av_cmp_q(mkq((int) cw[x], H), MARGIN) >= 0 || av_cmp_q(mkq((int) cb[x], H), MARGIN) >= 0)) {
+		x++;
+	}
+
+	left = x;
+
+	x = W - 1;
+
+	while (x > left && (av_cmp_q(mkq((int) cw[x], H), MARGIN) >= 0 || av_cmp_q(mkq((int) cb[x], H), MARGIN) >= 0)) {
+		x--;
+	}
+
+	right = x + 1;
+
+	bounds[0] = left;
+	bounds[1] = top;
+	bounds[2] = right - left;
+	bounds[3] = bottom - top;
+
+	end:;
+
+	av_freep(&gutter);
+	av_freep(&cw);
+	av_freep(&cb);
+	av_freep(&rgb);
+
+	return err;
+
+}
+
 int flare_main(int argc, argv_t** argv) {
 
 	int err = FLAREERR_SUCCESS;

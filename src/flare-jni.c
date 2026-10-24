@@ -6,7 +6,50 @@
 	#include <windows.h>
 #endif
 
+#include "errors.h"
 #include "flare.h"
+
+JNIEXPORT jintArray JNICALL Java_com_amanoteam_flare_Flare_findBounds(JNIEnv* env, jclass caller, jstring path) {
+
+	jintArray result = NULL;
+
+	jboolean copied = JNI_FALSE;
+
+	const char* utf = NULL;
+
+	int bounds[4] = {0, 0, 0, 0};
+
+	(void) caller;
+
+	if (path == NULL) {
+		return NULL;
+	}
+
+	utf = (*env)->GetStringUTFChars(env, path, &copied);
+
+	if (utf == NULL) {
+		return NULL;
+	}
+
+	bounds[0] = -1;
+
+	if (flare_bounds(utf, bounds) != FLAREERR_SUCCESS) {
+		(*env)->ReleaseStringUTFChars(env, path, utf);
+		return NULL;
+	}
+
+	(*env)->ReleaseStringUTFChars(env, path, utf);
+
+	result = (*env)->NewIntArray(env, 4);
+
+	if (result == NULL) {
+		return NULL;
+	}
+
+	(*env)->SetIntArrayRegion(env, result, 0, 4, (const jint*) bounds);
+
+	return result;
+}
 
 JNIEXPORT jint JNICALL Java_com_amanoteam_flare_Flare_flareMain(JNIEnv* env, jclass caller, jobjectArray arguments) {
 

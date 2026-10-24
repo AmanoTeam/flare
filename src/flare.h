@@ -8,6 +8,8 @@
 #define PROJECT_VERSION "0.1"
 #define PROJECT_REPOSITORY "https://github.com/AmanoTeam/flare"
 
+int flare_bounds(const char* const path, int* const bounds);
+
 int flare_main(int argc, argv_t** argv);
 
 #endif
