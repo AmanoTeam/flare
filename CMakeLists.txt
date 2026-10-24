@@ -9,6 +9,7 @@ project(
 )
 
 option(FLARE_LTO "Turn on compiler link-time optimizations" OFF)
+option(FLARE_LIBRARY "Build the project as a shared library" OFF)
 
 set(CMAKE_POLICY_DEFAULT_CMP0048 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
@@ -204,12 +205,62 @@ set(
 	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}avutil${CMAKE_STATIC_LIBRARY_SUFFIX}"
 )
 
-add_executable(
-	flare
+set(
+	FLARE_SOURCE_FILES
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/argparse.c"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/errors.c"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/gutter.c"
 )
+
+set(
+	FLARE_JNI_SOURCE_FILES
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/flare-jni.c"
+)
+
+if (FLARE_LIBRARY)
+	add_library(
+		flare
+		SHARED
+		${FLARE_SOURCE_FILES}
+		${FLARE_JNI_SOURCE_FILES}
+	)
+
+	target_compile_definitions(
+		flare
+		PRIVATE
+		FLARE_LIBRARY
+	)
+
+	if (NOT WIN32 AND NOT APPLE)
+		target_link_options(
+			flare
+			PRIVATE
+			"-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/version_script.map"
+		)
+	endif()
+
+	if (NOT ANDROID AND DEFINED ENV{JAVA_HOME})
+		set(FLARE_JNI_PLATFORM "linux")
+
+		if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+			set(FLARE_JNI_PLATFORM "darwin")
+		elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+			set(FLARE_JNI_PLATFORM "win32")
+		endif()
+
+		target_include_directories(
+			flare
+			PRIVATE
+			"$ENV{JAVA_HOME}/include"
+			"$ENV{JAVA_HOME}/include/${FLARE_JNI_PLATFORM}"
+		)
+	endif()
+else()
+	add_executable(
+		flare
+		${FLARE_SOURCE_FILES}
+	)
+endif()
 
 target_compile_options(
 	flare
@@ -291,4 +342,5 @@ endif()
 install(
 	TARGETS flare
 	RUNTIME DESTINATION bin
+	LIBRARY DESTINATION lib
 )

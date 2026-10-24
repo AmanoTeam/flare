@@ -289,7 +289,7 @@ static void copy_row(uint8_t* const dst, const uint8_t* const src, const int pad
 
 }
 
-int main(int argc, argv_t* argv[]) {
+int flare_main(int argc, argv_t** argv) {
 
 	int err = FLAREERR_SUCCESS;
 	int action = 0;
@@ -590,3 +590,9 @@ int main(int argc, argv_t* argv[]) {
 	return ((err == FLAREERR_SUCCESS) ? EXIT_SUCCESS : EXIT_FAILURE);
 
 }
+
+#if !defined(FLARE_LIBRARY)
+	int main(const int argc, char** const argv) {
+		return flare_main(argc, (argv_t**) argv);
+	}
+#endif
