@@ -6,9 +6,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__ANDROID__)
+	#include <android/log.h>
+#endif
+#include <stdarg.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/log.h>
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 
@@ -49,14 +54,6 @@ static const char KOPT_VERSION[] = "version";
 #define ACTION_MINIMUM (0x04)
 #define ACTION_HELP (0x10)
 #define ACTION_VERSION (0x11)
-
-static void die(const int code) {
-
-	fprintf(stderr, "fatal error: (%i) %s\n", -code, flare_getmessage(code));
-
-	exit(EXIT_FAILURE);
-
-}
 
 static int get_action(const arg_t* const arg) {
 
@@ -113,7 +110,7 @@ static AVRational mkq(const int num, const int den) {
 
 }
 
-static uint8_t* decode(const char* const path, int* W, int* H, int* S) {
+static uint8_t* decode(const char* const path, int* W, int* H, int* S, int* err) {
 
 	AVFormatContext* ic = NULL;
 	const AVCodec* c = NULL;
@@ -127,25 +124,45 @@ static uint8_t* decode(const char* const path, int* W, int* H, int* S) {
 	int got = 0;
 
 	if (avformat_open_input(&ic, path, NULL, NULL) < 0 || avformat_find_stream_info(ic, NULL) < 0) {
-		die(FLAREERR_INPUT_OPEN_FAILURE);
+		*err = FLAREERR_INPUT_OPEN_FAILURE;
+		goto fail;
 	}
 
 	v = av_find_best_stream(ic, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
 
 	if (v < 0) {
-		die(FLAREERR_VIDEO_STREAM_MISSING);
+		*err = FLAREERR_VIDEO_STREAM_MISSING;
+		goto fail;
 	}
 
 	c = avcodec_find_decoder(ic->streams[v]->codecpar->codec_id);
+
+	if (c == NULL) {
+		*err = FLAREERR_DECODER_OPEN_FAILURE;
+		goto fail;
+	}
+
 	dc = avcodec_alloc_context3(c);
+
+	if (dc == NULL) {
+		*err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto fail;
+	}
+
 	avcodec_parameters_to_context(dc, ic->streams[v]->codecpar);
 
 	if (avcodec_open2(dc, c, NULL) < 0) {
-		die(FLAREERR_DECODER_OPEN_FAILURE);
+		*err = FLAREERR_DECODER_OPEN_FAILURE;
+		goto fail;
 	}
 
 	pk = av_packet_alloc();
 	fr = av_frame_alloc();
+
+	if (pk == NULL || fr == NULL) {
+		*err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto fail;
+	}
 
 	while (!got && av_read_frame(ic, pk) >= 0) {
 		if (pk->stream_index == v) {
@@ -170,11 +187,24 @@ static uint8_t* decode(const char* const path, int* W, int* H, int* S) {
 	}
 
 	if (!got) {
-		die(FLAREERR_DECODE_FAILED);
+		*err = FLAREERR_DECODE_FAILED;
+		goto fail;
 	}
 
-	av_image_alloc(d, l, fr->width, fr->height, AV_PIX_FMT_RGB24, 1);
+	if (av_image_alloc(d, l, fr->width, fr->height, AV_PIX_FMT_RGB24, 1) < 0) {
+		*err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto fail;
+	}
+
 	sw = sws_getContext(fr->width, fr->height, fr->format, fr->width, fr->height, AV_PIX_FMT_RGB24, SWS_BILINEAR, NULL, NULL, NULL);
+
+	if (sw == NULL) {
+		av_freep(&d[0]);
+
+		*err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto fail;
+	}
+
 	sws_scale(sw, (const uint8_t* const*) fr->data, fr->linesize, 0, fr->height, d, l);
 
 	*W = fr->width;
@@ -189,9 +219,18 @@ static uint8_t* decode(const char* const path, int* W, int* H, int* S) {
 
 	return d[0];
 
+	fail:;
+		sws_freeContext(sw);
+		av_frame_free(&fr);
+		av_packet_free(&pk);
+		avcodec_free_context(&dc);
+		avformat_close_input(&ic);
+
+		return NULL;
+
 }
 
-static void save(const char* const path, uint8_t* const src, const int S, const int W, const int H) {
+static int save(const char* const path, uint8_t* const src, const int S, const int W, const int H) {
 
 	AVFormatContext* oc = NULL;
 	const AVCodec* e = NULL;
@@ -202,9 +241,11 @@ static void save(const char* const path, uint8_t* const src, const int S, const 
 	const uint8_t* sd[4] = {0};
 	int sl[4] = {0};
 	int dl[4] = {0};
+	int err = FLAREERR_SUCCESS;
 
 	if (avformat_alloc_output_context2(&oc, NULL, NULL, path) < 0) {
-		die(FLAREERR_OUTPUT_CONTEXT_FAILURE);
+		err = FLAREERR_OUTPUT_CONTEXT_FAILURE;
+		goto end;
 	}
 
 	if (oc->priv_data != NULL) {
@@ -212,7 +253,18 @@ static void save(const char* const path, uint8_t* const src, const int S, const 
 	}
 
 	e = avcodec_find_encoder(AV_CODEC_ID_PNG);
+
+	if (e == NULL) {
+		err = FLAREERR_ENCODER_OPEN_FAILURE;
+		goto end;
+	}
+
 	ec = avcodec_alloc_context3(e);
+
+	if (ec == NULL) {
+		err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto end;
+	}
 
 	ec->width = W;
 	ec->height = H;
@@ -220,26 +272,45 @@ static void save(const char* const path, uint8_t* const src, const int S, const 
 	ec->time_base = TB;
 
 	if (avcodec_open2(ec, e, NULL) < 0) {
-		die(FLAREERR_ENCODER_OPEN_FAILURE);
+		err = FLAREERR_ENCODER_OPEN_FAILURE;
+		goto end;
 	}
 
 	os = avformat_new_stream(oc, NULL);
+
+	if (os == NULL) {
+		err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto end;
+	}
+
 	avcodec_parameters_from_context(os->codecpar, ec);
 	os->time_base = TB;
 
 	if (avio_open(&oc->pb, path, AVIO_FLAG_WRITE) < 0) {
-		die(FLAREERR_OUTPUT_FILE_OPEN_FAILURE);
+		err = FLAREERR_OUTPUT_FILE_OPEN_FAILURE;
+		goto end;
 	}
 
 	if (avformat_write_header(oc, NULL) < 0) {
-		die(FLAREERR_WRITE_HEADER_FAILURE);
+		err = FLAREERR_WRITE_HEADER_FAILURE;
+		goto end;
 	}
 
 	f = av_frame_alloc();
+
+	if (f == NULL) {
+		err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto end;
+	}
+
 	f->format = AV_PIX_FMT_RGB24;
 	f->width = W;
 	f->height = H;
-	av_frame_get_buffer(f, 0);
+
+	if (av_frame_get_buffer(f, 0) < 0) {
+		err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto end;
+	}
 
 	sd[0] = src;
 	sl[0] = S;
@@ -253,6 +324,11 @@ static void save(const char* const path, uint8_t* const src, const int S, const 
 
 	pk = av_packet_alloc();
 
+	if (pk == NULL) {
+		err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto end;
+	}
+
 	while (avcodec_receive_packet(ec, pk) >= 0) {
 		av_packet_rescale_ts(pk, ec->time_base, os->time_base);
 		av_interleaved_write_frame(oc, pk);
@@ -260,11 +336,19 @@ static void save(const char* const path, uint8_t* const src, const int S, const 
 	}
 
 	av_write_trailer(oc);
+
+	end:;
+
 	av_packet_free(&pk);
 	av_frame_free(&f);
 	avcodec_free_context(&ec);
-	avio_closep(&oc->pb);
-	avformat_free_context(oc);
+
+	if (oc != NULL) {
+		avio_closep(&oc->pb);
+		avformat_free_context(oc);
+	}
+
+	return err;
 
 }
 
@@ -293,6 +377,43 @@ static void copy_row(uint8_t* const dst, const uint8_t* const src, const int pad
 	}
 
 }
+
+#if defined(__ANDROID__)
+	static void flare_log(const int priority, const char* const format, ...) {
+		va_list arguments;
+
+		va_start(arguments, format);
+
+		__android_log_vprint(priority, PROJECT_NAME, format, arguments);
+
+		va_end(arguments);
+	}
+
+	static void flare_av_log_callback(void* context, const int level, const char* const format, va_list arguments) {
+		(void) context;
+		(void) level;
+
+		__android_log_vprint(ANDROID_LOG_ERROR, PROJECT_NAME, format, arguments);
+	}
+#else
+	#define ANDROID_LOG_INFO 0
+	#define ANDROID_LOG_ERROR 1
+
+	static void flare_log(const int priority, const char* const format, ...) {
+		va_list arguments;
+
+		va_start(arguments, format);
+
+		if (priority == ANDROID_LOG_ERROR) {
+			vfprintf(stderr, format, arguments);
+		}
+		else {
+			vprintf(format, arguments);
+		}
+
+		va_end(arguments);
+	}
+#endif
 
 int flare_main(int argc, argv_t** argv) {
 
@@ -357,6 +478,14 @@ int flare_main(int argc, argv_t** argv) {
 
 	argparse_t argparse = {0};
 	const arg_t* arg = NULL;
+
+	#if defined(FLARE_LIBRARY)
+		#if defined(__ANDROID__)
+			av_log_set_callback(flare_av_log_callback);
+		#endif
+
+		av_log_set_level(AV_LOG_ERROR);
+	#endif
 
 	err = argparse_init(&argparse, argc, argv);
 
@@ -448,12 +577,27 @@ int flare_main(int argc, argv_t** argv) {
 		snprintf(outb, sizeof outb, "%.*s_nogutter.png", (int) (strrchr(in, '.') ? strrchr(in, '.') - in : (int) strlen(in)), in);
 	}
 
-	rgb = decode(in, &W, &H, &S);
+	rgb = decode(in, &W, &H, &S, &err);
+
+	if (rgb == NULL) {
+		goto end;
+	}
+
 	gutter = av_mallocz(H);
+
+	if (gutter == NULL) {
+		err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto end;
+	}
 
 	if (sides) {
 		cw = av_calloc(W, sizeof(long));
 		cb = av_calloc(W, sizeof(long));
+
+		if (cw == NULL || cb == NULL) {
+			err = FLAREERR_MEM_ALLOC_FAILURE;
+			goto end;
+		}
 	}
 
 	for (y = 0; y < H; y++) {
@@ -499,7 +643,8 @@ int flare_main(int argc, argv_t** argv) {
 	}
 
 	if (!KR) {
-		die(FLAREERR_IMAGE_NO_CONTENT);
+		err = FLAREERR_IMAGE_NO_CONTENT;
+		goto end;
 	}
 
 	runs = 0;
@@ -531,7 +676,8 @@ int flare_main(int argc, argv_t** argv) {
 	}
 
 	if (KR == H && lb == 0 && rb == W - 1) {
-		printf("no gutters found\n");
+		flare_log(ANDROID_LOG_INFO, "no gutters found\n");
+
 		goto end;
 	}
 
@@ -567,6 +713,12 @@ int flare_main(int argc, argv_t** argv) {
 	span = OW - pad_left - pad_right;
 	OL = av_image_get_linesize(AV_PIX_FMT_RGB24, OW, 0);
 	ob = av_malloc(av_image_get_buffer_size(AV_PIX_FMT_RGB24, OW, OH, 1));
+
+	if (ob == NULL) {
+		err = FLAREERR_MEM_ALLOC_FAILURE;
+		goto end;
+	}
+
 	dst = ob;
 
 	y = 0;
@@ -602,14 +754,22 @@ int flare_main(int argc, argv_t** argv) {
 		}
 	}
 
-	save(out, ob, OL, OW, OH);
+	err = save(out, ob, OL, OW, OH);
 
-	printf("%dx%d -> %dx%d  %s\n", W, H, OW, OH, out);
+	if (err == FLAREERR_SUCCESS) {
+		flare_log(ANDROID_LOG_INFO, "%dx%d -> %dx%d  %s\n", W, H, OW, OH, out);
+	}
 
 	end:;
 
+	av_freep(&rgb);
+	av_freep(&gutter);
+	av_freep(&cw);
+	av_freep(&cb);
+	av_freep(&ob);
+
 	if (err != FLAREERR_SUCCESS) {
-		fprintf(stderr, "fatal error: (%i) %s", -err, flare_getmessage(err));
+		flare_log(ANDROID_LOG_ERROR, "fatal error: (%i) %s", -err, flare_getmessage(err));
 
 		switch (err) {
 			case FLAREERR_ARGPARSE_ARGUMENT_VALUE_MISSING:
@@ -628,7 +788,11 @@ int flare_main(int argc, argv_t** argv) {
 
 	argparse_free(&argparse);
 
-	return ((err == FLAREERR_SUCCESS) ? EXIT_SUCCESS : EXIT_FAILURE);
+	#if defined(FLARE_LIBRARY)
+		return ((err == FLAREERR_SUCCESS) ? EXIT_SUCCESS : err);
+	#else
+		return ((err == FLAREERR_SUCCESS) ? EXIT_SUCCESS : EXIT_FAILURE);
+	#endif
 
 }
 

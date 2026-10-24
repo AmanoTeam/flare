@@ -58,9 +58,9 @@ set(
 	--enable-avutil
 	--enable-swscale
 	--enable-swresample
-	--enable-decoder=aac,h264,mp3,png,webp
+	--enable-decoder=aac,h264,mp3,png,webp,mjpeg
 	--enable-encoder=png
-	--enable-demuxer=aac,h264,hls,webvtt,mp3,image2,webp
+	--enable-demuxer=aac,h264,hls,webvtt,mp3,image2,webp,image2pipe,image_png_pipe,image_jpeg_pipe,image_webp_pipe
 	--enable-muxer=h264,mpegts,mp4,matroska,mp3,image2
 	--enable-parser=h264,aac
 	--enable-bsf=extract_extradata
@@ -72,10 +72,15 @@ set(
 	--extra-cflags=-Dstatic_assert=_Static_assert
 	--extra-cflags=-w
 	--extra-cflags=${CMAKE_C_FLAGS}
-	--extra-cflags=-I${ZLIB_SOURCE_DIRECTORY}
 	--extra-ldflags=-fPIC
 	--prefix="${FFMPEG_INSTALL_PREFIX}"
 )
+
+if (NOT ANDROID)
+	list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-cflags=-I${ZLIB_SOURCE_DIRECTORY}")
+endif()
+
+file(LOCK "${CMAKE_CURRENT_SOURCE_DIR}/lock")
 
 execute_process(
 	COMMAND git submodule update --init --depth=1
@@ -83,16 +88,31 @@ execute_process(
 	COMMAND_ERROR_IS_FATAL ANY
 )
 
-if (SERENITYOS)
-	file(READ "${CMAKE_CURRENT_SOURCE_DIR}/submodules/ffmpeg/libavutil/thread.h" FILE_CONTENTS)
+if (SERENITYOS AND NOT EXISTS "${FFMPEG_SOURCE_DIRECTORY}/.thread-patched")
+	file(READ "${FFMPEG_SOURCE_DIRECTORY}/libavutil/thread.h" FILE_CONTENTS)
 	string(REPLACE "#if HAVE_PRCTL" "#if !defined(__serenity__) && HAVE_PRCTL" FILE_CONTENTS "${FILE_CONTENTS}")
-	file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/submodules/ffmpeg/libavutil/thread.h" "${FILE_CONTENTS}")
+	file(WRITE "${FFMPEG_SOURCE_DIRECTORY}/libavutil/thread.h" "${FILE_CONTENTS}")
+
+	file(WRITE "${FFMPEG_SOURCE_DIRECTORY}/.thread-patched" "")
 endif()
 
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/submodules/ffmpeg/configure" FILE_CONTENTS)
-string(REPLACE "die \"Host compiler lacks C11 support\"" "true" FILE_CONTENTS "${FILE_CONTENTS}")
-string(REPLACE "check_lib zlib   zlib.h      zlibVersion    -lz" "true" FILE_CONTENTS "${FILE_CONTENTS}")
-file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/submodules/ffmpeg/configure" "${FILE_CONTENTS}")
+set(FFMPEG_CONFIGURE_ORIGINAL "")
+
+file(READ "${FFMPEG_SOURCE_DIRECTORY}/configure" FFMPEG_CONFIGURE_ORIGINAL)
+
+set(FFMPEG_CONFIGURE_PATCHED "${FFMPEG_CONFIGURE_ORIGINAL}")
+
+string(REPLACE "die \"Host compiler lacks C11 support\"" "true" FFMPEG_CONFIGURE_PATCHED "${FFMPEG_CONFIGURE_PATCHED}")
+
+string(REPLACE "check_pkg_config zlib zlib \"zlib.h\" zlibVersion ||" "check_lib zlib zlib.h zlibVersion -lz ||" FFMPEG_CONFIGURE_PATCHED "${FFMPEG_CONFIGURE_PATCHED}")
+
+string(REPLACE "check_lib zlib   zlib.h      zlibVersion    -lz; }" "true; }" FFMPEG_CONFIGURE_PATCHED "${FFMPEG_CONFIGURE_PATCHED}")
+
+if (NOT "${FFMPEG_CONFIGURE_PATCHED}" STREQUAL "${FFMPEG_CONFIGURE_ORIGINAL}")
+	file(WRITE "${FFMPEG_SOURCE_DIRECTORY}/configure" "${FFMPEG_CONFIGURE_PATCHED}")
+endif()
+
+file(LOCK "${CMAKE_CURRENT_SOURCE_DIR}/lock" RELEASE)
 
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
 	add_compile_options($<$<CONFIG:Release>:-fipa-pta>)
@@ -119,8 +139,45 @@ if (CMAKE_CROSSCOMPILING)
 		list(APPEND FFMPEG_CONFIGURE_FLAGS "--cross-prefix=$ENV{CROSS_COMPILE_TRIPLET}-")
 	endif()
 
+	if (ANDROID)
+		set(FLARE_API_LEVEL "${ANDROID_PLATFORM_LEVEL}")
+
+		if (FLARE_API_LEVEL STREQUAL "")
+			string(REGEX MATCH "[0-9]+$" FLARE_API_LEVEL "${ANDROID_PLATFORM}")
+		endif()
+
+		if ("${ANDROID_ABI}" STREQUAL "arm64-v8a")
+			set(FLARE_ARCHITECTURE "aarch64")
+			set(FLARE_TRIPLE "aarch64-unknown-linux-android")
+		elseif ("${ANDROID_ABI}" STREQUAL "armeabi-v7a")
+			set(FLARE_ARCHITECTURE "arm")
+			set(FLARE_TRIPLE "armv7a-unknown-linux-androideabi")
+		elseif ("${ANDROID_ABI}" STREQUAL "x86_64")
+			set(FLARE_ARCHITECTURE "x86_64")
+			set(FLARE_TRIPLE "x86_64-unknown-linux-android")
+		else()
+			set(FLARE_ARCHITECTURE "i686")
+			set(FLARE_TRIPLE "i686-unknown-linux-android")
+		endif()
+
+		list(APPEND FFMPEG_CONFIGURE_FLAGS "--enable-cross-compile")
+		list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-cflags=--target=${FLARE_TRIPLE}${FLARE_API_LEVEL}")
+
+		if (CMAKE_SYSROOT)
+			list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-cflags=--sysroot=${CMAKE_SYSROOT}")
+		endif()
+
+		list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-ldflags=--target=${FLARE_TRIPLE}${FLARE_API_LEVEL}")
+
+		if (CMAKE_SYSROOT)
+			list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-ldflags=--sysroot=${CMAKE_SYSROOT}")
+		endif()
+	else()
+		set(FLARE_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
+	endif()
+
 	list(APPEND FFMPEG_CONFIGURE_FLAGS "--target-os=${system_name}")
-	list(APPEND FFMPEG_CONFIGURE_FLAGS "--arch=${CMAKE_SYSTEM_PROCESSOR}")
+	list(APPEND FFMPEG_CONFIGURE_FLAGS "--arch=${FLARE_ARCHITECTURE}")
 	list(APPEND FFMPEG_CONFIGURE_FLAGS "--as=${CMAKE_C_COMPILER}")
 	list(APPEND FFMPEG_CONFIGURE_FLAGS "--ld=${CMAKE_C_COMPILER}")
 	list(APPEND FFMPEG_CONFIGURE_FLAGS "--cc=${CMAKE_C_COMPILER}")
@@ -151,8 +208,18 @@ if (NOT EXISTS "${FFMPEG_BUILD_DIRECTORY}")
 	file(MAKE_DIRECTORY "${FFMPEG_BUILD_DIRECTORY}")
 endif()
 
-if (NOT EXISTS "${FFMPEG_BUILD_DIRECTORY}/Makefile")
+set(FFMPEG_PREVIOUS_FLAGS "")
+
+if (EXISTS "${FFMPEG_BUILD_DIRECTORY}/.configure-flags")
+	file(READ "${FFMPEG_BUILD_DIRECTORY}/.configure-flags" FFMPEG_PREVIOUS_FLAGS)
+endif()
+
+string(JOIN " " FFMPEG_CONFIGURE_FLAGS_TEXT ${FFMPEG_CONFIGURE_FLAGS})
+
+if (NOT "${FFMPEG_PREVIOUS_FLAGS}" STREQUAL "${FFMPEG_CONFIGURE_FLAGS_TEXT}")
 	message("-- Configuring FFmpeg")
+
+	file(WRITE "${FFMPEG_BUILD_DIRECTORY}/.configure-flags" "${FFMPEG_CONFIGURE_FLAGS_TEXT}")
 
 	execute_process(
 		COMMAND bash
@@ -163,39 +230,6 @@ if (NOT EXISTS "${FFMPEG_BUILD_DIRECTORY}/Makefile")
 	)
 endif()
 
-if (NOT EXISTS "${FFMPEG_INSTALL_PREFIX}")
-	add_custom_command(
-		OUTPUT "${FFMPEG_INSTALL_PREFIX}"
-		COMMAND make
-		COMMAND make install
-		WORKING_DIRECTORY "${FFMPEG_BUILD_DIRECTORY}"
-		COMMENT "-- Building FFmpeg"
-	)
-endif()
-
-add_custom_target(
-	ffmpeg
-	ALL
-	DEPENDS "${FFMPEG_INSTALL_PREFIX}"
-)
-
-# zlib
-set(ZLIB_BUILD_SHARED OFF)
-set(ZLIB_BUILD_STATIC ON)
-set(ZLIB_BUILD_TESTING OFF)
-set(BUILD_TESTING OFF)
-
-add_subdirectory(
-	submodules/zlib
-	EXCLUDE_FROM_ALL
-)
-
-set_target_properties(
-	zlibstatic
-	PROPERTIES
-	POSITION_INDEPENDENT_CODE ON
-)
-
 set(
 	FFMPEG_LIBRARIES
 	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}avformat${CMAKE_STATIC_LIBRARY_SUFFIX}"
@@ -204,6 +238,44 @@ set(
 	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}swresample${CMAKE_STATIC_LIBRARY_SUFFIX}"
 	"${FFMPEG_INSTALL_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}avutil${CMAKE_STATIC_LIBRARY_SUFFIX}"
 )
+
+add_custom_command(
+	OUTPUT ${FFMPEG_LIBRARIES}
+	COMMAND make
+	COMMAND make install
+	DEPENDS "${FFMPEG_BUILD_DIRECTORY}/.configure-flags"
+	WORKING_DIRECTORY "${FFMPEG_BUILD_DIRECTORY}"
+	COMMENT "-- Building FFmpeg"
+)
+
+add_custom_target(
+	ffmpeg
+	ALL
+	DEPENDS ${FFMPEG_LIBRARIES}
+)
+
+# zlib
+if (ANDROID)
+	set(FLARE_ZLIB_LIBRARY "z")
+else()
+	set(FLARE_ZLIB_LIBRARY zlibstatic)
+
+	set(ZLIB_BUILD_SHARED OFF)
+	set(ZLIB_BUILD_STATIC ON)
+	set(ZLIB_BUILD_TESTING OFF)
+	set(BUILD_TESTING OFF)
+
+	add_subdirectory(
+		submodules/zlib
+		EXCLUDE_FROM_ALL
+	)
+
+	set_target_properties(
+		zlibstatic
+		PROPERTIES
+		POSITION_INDEPENDENT_CODE ON
+	)
+endif()
 
 set(
 	FLARE_SOURCE_FILES
@@ -288,10 +360,17 @@ if (FLARE_LTO)
 	if (FLARE_HAS_LTO)
 		set_target_properties(
 			flare
-			zlibstatic
 			PROPERTIES
 			INTERPROCEDURAL_OPTIMIZATION TRUE
 		)
+
+		if (NOT ANDROID)
+			set_target_properties(
+				zlibstatic
+				PROPERTIES
+				INTERPROCEDURAL_OPTIMIZATION TRUE
+			)
+		endif()
 	endif()
 endif()
 
@@ -299,7 +378,7 @@ target_link_libraries(
 	flare
 	PRIVATE
 	${FFMPEG_LIBRARIES}
-	zlibstatic
+	${FLARE_ZLIB_LIBRARY}
 )
 
 if (UNIX)
@@ -307,6 +386,14 @@ if (UNIX)
 		flare
 		PRIVATE
 		m
+	)
+endif()
+
+if (ANDROID)
+	target_link_libraries(
+		flare
+		PRIVATE
+		log
 	)
 endif()
 
