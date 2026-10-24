@@ -7,9 +7,10 @@
 #endif
 
 #include "errors.h"
+#include <libavutil/mem.h>
 #include "flare.h"
 
-JNIEXPORT jintArray JNICALL Java_com_amanoteam_flare_Flare_findBounds(JNIEnv* env, jclass caller, jstring path) {
+JNIEXPORT jintArray JNICALL Java_com_amanoteam_flare_Flare_findBands(JNIEnv* env, jclass caller, jstring path) {
 
 	jintArray result = NULL;
 
@@ -17,7 +18,8 @@ JNIEXPORT jintArray JNICALL Java_com_amanoteam_flare_Flare_findBounds(JNIEnv* en
 
 	const char* utf = NULL;
 
-	int bounds[4] = {0, 0, 0, 0};
+	int* bands = NULL;
+	int count = 0;
 
 	(void) caller;
 
@@ -31,22 +33,27 @@ JNIEXPORT jintArray JNICALL Java_com_amanoteam_flare_Flare_findBounds(JNIEnv* en
 		return NULL;
 	}
 
-	bounds[0] = -1;
-
-	if (flare_bounds(utf, bounds) != FLAREERR_SUCCESS) {
+	if (flare_bands(utf, &bands, &count) != FLAREERR_SUCCESS) {
 		(*env)->ReleaseStringUTFChars(env, path, utf);
+
+		av_free(bands);
+
 		return NULL;
 	}
 
 	(*env)->ReleaseStringUTFChars(env, path, utf);
 
-	result = (*env)->NewIntArray(env, 4);
+	result = (*env)->NewIntArray(env, count);
 
-	if (result == NULL) {
+	if (result == NULL || count == 0) {
+		av_free(bands);
+
 		return NULL;
 	}
 
-	(*env)->SetIntArrayRegion(env, result, 0, 4, (const jint*) bounds);
+	(*env)->SetIntArrayRegion(env, result, 0, count, (const jint*) bands);
+
+	av_free(bands);
 
 	return result;
 }

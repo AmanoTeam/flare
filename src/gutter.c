@@ -415,26 +415,27 @@ static void copy_row(uint8_t* const dst, const uint8_t* const src, const int pad
 	}
 #endif
 
-int flare_bounds(const char* const path, int* const bounds) {
+int flare_bands(const char* const path, int** const bands, int* const count) {
 
 	int err = FLAREERR_SUCCESS;
 	int W = 0;
 	int H = 0;
 	int S = 0;
 	int KR = 0;
+	int runs = 0;
 	int c = 0;
 	int bc = 0;
-	int top = 0;
-	int bottom = 0;
 	int left = 0;
 	int right = 0;
 	int y = 0;
 	int x = 0;
+	int start = 0;
 
 	uint8_t* rgb = NULL;
 	uint8_t* gutter = NULL;
 	long* cw = NULL;
 	long* cb = NULL;
+	int* out = NULL;
 
 	const uint8_t* p = NULL;
 	const uint8_t* e = NULL;
@@ -451,8 +452,9 @@ int flare_bounds(const char* const path, int* const bounds) {
 	gutter = av_mallocz(H);
 	cw = av_calloc(W, sizeof(long));
 	cb = av_calloc(W, sizeof(long));
+	out = av_malloc((H + 6) * sizeof(int));
 
-	if (gutter == NULL || cw == NULL || cb == NULL) {
+	if (gutter == NULL || cw == NULL || cb == NULL || out == NULL) {
 		err = FLAREERR_MEM_ALLOC_FAILURE;
 
 		goto end;
@@ -491,29 +493,19 @@ int flare_bounds(const char* const path, int* const bounds) {
 	}
 
 	if (KR == 0) {
-		bounds[0] = 0;
-		bounds[1] = 0;
-		bounds[2] = W;
-		bounds[3] = H;
+		out[0] = 0;
+		out[1] = 0;
+		out[2] = W;
+		out[3] = H;
+		out[4] = 1;
+		out[5] = 0;
+		out[6] = H;
 
-		goto end;
+		*bands = out;
+		*count = 7;
+
+		goto end_early;
 	}
-
-	y = 0;
-
-	while (gutter[y] != 0) {
-		y++;
-	}
-
-	top = y;
-
-	y = H - 1;
-
-	while (gutter[y] != 0) {
-		y--;
-	}
-
-	bottom = y + 1;
 
 	x = 0;
 
@@ -531,13 +523,40 @@ int flare_bounds(const char* const path, int* const bounds) {
 
 	right = x + 1;
 
-	bounds[0] = left;
-	bounds[1] = top;
-	bounds[2] = right - left;
-	bounds[3] = bottom - top;
+	for (y = 0; y < H; y++) {
+		if (gutter[y] == 0 && (y == 0 || gutter[y - 1] != 0)) {
+			start = y;
+		}
+
+		if (gutter[y] == 0 && (y + 1 == H || gutter[y + 1] != 0)) {
+			out[5 + runs * 2] = start;
+			out[6 + runs * 2] = y + 1 - start;
+
+			runs++;
+		}
+	}
+
+	out[0] = left;
+	out[1] = out[5];
+	out[2] = right - left;
+	out[3] = out[5 + (runs - 1) * 2] + out[6 + (runs - 1) * 2] - out[1];
+	out[4] = runs;
+
+	*bands = out;
+	*count = 5 + runs * 2;
+
+	end_early:;
+
+	av_freep(&gutter);
+	av_freep(&cw);
+	av_freep(&cb);
+	av_freep(&rgb);
+
+	return err;
 
 	end:;
 
+	av_freep(&out);
 	av_freep(&gutter);
 	av_freep(&cw);
 	av_freep(&cb);
