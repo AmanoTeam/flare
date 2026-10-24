@@ -161,16 +161,10 @@ if (CMAKE_CROSSCOMPILING)
 		endif()
 
 		list(APPEND FFMPEG_CONFIGURE_FLAGS "--enable-cross-compile")
-		list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-cflags=--target=${FLARE_TRIPLE}${FLARE_API_LEVEL}")
 
-		if (CMAKE_SYSROOT)
-			list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-cflags=--sysroot=${CMAKE_SYSROOT}")
-		endif()
-
-		list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-ldflags=--target=${FLARE_TRIPLE}${FLARE_API_LEVEL}")
-
-		if (CMAKE_SYSROOT)
-			list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-ldflags=--sysroot=${CMAKE_SYSROOT}")
+		if (CMAKE_C_COMPILER_ID MATCHES "Clang")
+			list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-cflags=--target=${FLARE_TRIPLE}${FLARE_API_LEVEL}")
+			list(APPEND FFMPEG_CONFIGURE_FLAGS "--extra-ldflags=--target=${FLARE_TRIPLE}${FLARE_API_LEVEL}")
 		endif()
 	else()
 		set(FLARE_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
