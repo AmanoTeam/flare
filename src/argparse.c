@@ -6,7 +6,6 @@
 #endif
 
 #include "argparse.h"
-#include "errors.h"
 
 static const arg_t* argparse_next(
 	argparse_t* const parser,
@@ -139,10 +138,16 @@ int argparse_init(
 	argv_t** const argv
 ) {
 	
-	int err = M3U8ERR_SUCCESS;
+	int err = ARGPARSE_ERR_SUCCESS;
+	
 	size_t index = 0;
+	size_t size = 0;
 	
 	arg_t argument = {0};
+	
+	arg_t* prev = NULL;
+	arg_t* cur = NULL;
+	arg_t* next = NULL;
 	
 	parser->index = 1;
 	parser->argc = (size_t) argc;
@@ -152,7 +157,7 @@ int argparse_init(
 	parser->arguments.items = malloc(parser->arguments.size);
 	
 	if (parser->arguments.items == NULL) {
-		err = M3U8ERR_MEMORY_ALLOCATE_FAILURE;
+		err = ARGPARSE_ERR_MEM_ALLOC_FAILURE;
 		goto end;
 	}
 	
@@ -160,27 +165,28 @@ int argparse_init(
 		parser->arguments.items[parser->arguments.offset++] = argument;
 		
 		if (argument.key == NULL && argument.value == NULL) {
-			err = M3U8ERR_CLI_ARGUMENT_EMPTY;
+			err = ARGPARSE_ERR_ARGUMENT_EMPTY;
 			goto end;
 		}
 	}
 	
 	for (index = 0; index < parser->arguments.offset; index++) {
-		arg_t* const prev = &parser->arguments.items[index - 1];
-		arg_t* const cur = &parser->arguments.items[index];
-		arg_t* const next = &parser->arguments.items[index + 1];
+		cur = &parser->arguments.items[index];
+		next = &parser->arguments.items[index + 1];
 		
 		if (cur->type != ARGTYPE_VALUE_ONLY) {
 			continue;
 		}
 		
 		if (index == 0) {
-			err = M3U8ERR_CLI_VALUE_UNEXPECTED;
+			err = ARGPARSE_ERR_VALUE_UNEXPECTED;
 			goto end;
 		}
 		
+		prev = &parser->arguments.items[index - 1];
+		
 		if (prev->type != ARGTYPE_NON_VALUE) {
-			err = M3U8ERR_CLI_VALUE_UNEXPECTED;
+			err = ARGPARSE_ERR_VALUE_UNEXPECTED;
 			goto end;
 		}
 		
@@ -188,8 +194,9 @@ int argparse_init(
 		prev->value = cur->value;
 		
 		cur->value = NULL;
+		size = (parser->arguments.offset - (index + 1)) * sizeof(argument);
 		
-		memmove(cur, next, (parser->arguments.offset - (index + 1)) * sizeof(argument));
+		memmove(cur, next, size);
 		
 		parser->arguments.offset--;
 		index--;
@@ -199,7 +206,7 @@ int argparse_init(
 	
 	parser->index = 0;
 	
-	if (err != M3U8ERR_SUCCESS) {
+	if (err != ARGPARSE_ERR_SUCCESS) {
 		argparse_free(parser);
 	}
 	
@@ -231,12 +238,14 @@ void argparse_free(argparse_t* const parser) {
 	
 	size_t index = 0;
 	
+	arg_t* argument = NULL;
+	
 	parser->index = 0;
 	parser->argc = 0;
 	parser->argv = NULL;
 	
 	for (index = 0; index < parser->arguments.offset; index++) {
-		arg_t* const argument = &parser->arguments.items[index];
+		argument = &parser->arguments.items[index];
 		argument_free(argument);
 	}
 	

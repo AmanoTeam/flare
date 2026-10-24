@@ -3,6 +3,11 @@
 
 #include <stdlib.h>
 
+#define ARGPARSE_ERR_SUCCESS 0 /* Success */
+#define ARGPARSE_ERR_MEM_ALLOC_FAILURE -1 /* Could not allocate memory */
+#define ARGPARSE_ERR_VALUE_UNEXPECTED -2 /* Got an unexpected value while parsing the command-line arguments */
+#define ARGPARSE_ERR_ARGUMENT_EMPTY -3 /* Got an empty argument while parsing the command-line arguments */
+
 #if defined(_WIN32) && defined(_UNICODE)
 	#define argv_t wchar_t
 #else
