@@ -425,23 +425,16 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 	int runs = 0;
 	int c = 0;
 	int bc = 0;
-	int left = 0;
-	int right = 0;
 	int y = 0;
-	int x = 0;
 	int start = 0;
 
 	uint8_t* rgb = NULL;
 	uint8_t* gutter = NULL;
-	long* cw = NULL;
-	long* cb = NULL;
 	int* out = NULL;
 
 	const uint8_t* p = NULL;
 	const uint8_t* e = NULL;
 	const uint8_t* q = NULL;
-	long* cx = NULL;
-	long* bx = NULL;
 
 	rgb = decode(path, &W, &H, &S, &err);
 
@@ -450,11 +443,9 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 	}
 
 	gutter = av_mallocz(H);
-	cw = av_calloc(W, sizeof(long));
-	cb = av_calloc(W, sizeof(long));
 	out = av_malloc((H + 6) * sizeof(int));
 
-	if (gutter == NULL || cw == NULL || cb == NULL || out == NULL) {
+	if (gutter == NULL || out == NULL) {
 		err = FLAREERR_MEM_ALLOC_FAILURE;
 
 		goto end;
@@ -467,14 +458,12 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 		c = 0;
 		bc = 0;
 
-		for (q = p, cx = cw, bx = cb; q < e; q += 3, cx++, bx++) {
+		for (q = p; q < e; q += 3) {
 			if (wh(q)) {
 				c++;
-				(*cx)++;
 			}
 			else if (bl(q)) {
 				bc++;
-				(*bx)++;
 			}
 		}
 
@@ -507,22 +496,6 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 		goto end_early;
 	}
 
-	x = 0;
-
-	while (x < W && (av_cmp_q(mkq((int) cw[x], H), MARGIN) >= 0 || av_cmp_q(mkq((int) cb[x], H), MARGIN) >= 0)) {
-		x++;
-	}
-
-	left = x;
-
-	x = W - 1;
-
-	while (x > left && (av_cmp_q(mkq((int) cw[x], H), MARGIN) >= 0 || av_cmp_q(mkq((int) cb[x], H), MARGIN) >= 0)) {
-		x--;
-	}
-
-	right = x + 1;
-
 	for (y = 0; y < H; y++) {
 		if (gutter[y] == 0 && (y == 0 || gutter[y - 1] != 0)) {
 			start = y;
@@ -536,9 +509,9 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 		}
 	}
 
-	out[0] = left;
+	out[0] = 0;
 	out[1] = out[5];
-	out[2] = right - left;
+	out[2] = W;
 	out[3] = out[5 + (runs - 1) * 2] + out[6 + (runs - 1) * 2] - out[1];
 	out[4] = runs;
 
@@ -548,8 +521,6 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 	end_early:;
 
 	av_freep(&gutter);
-	av_freep(&cw);
-	av_freep(&cb);
 	av_freep(&rgb);
 
 	return err;
@@ -558,8 +529,6 @@ int flare_bands(const char* const path, int** const bands, int* const count) {
 
 	av_freep(&out);
 	av_freep(&gutter);
-	av_freep(&cw);
-	av_freep(&cb);
 	av_freep(&rgb);
 
 	return err;
